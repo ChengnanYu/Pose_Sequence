@@ -11,9 +11,9 @@ from . import networks
 import pickle
 import numpy
 
-class PoseNetModel(BaseModel):
+class PoseLSTMModel(BaseModel):
     def name(self):
-        return 'PoseNetModel'
+        return 'PoseLSTMModel'
 
     def initialize(self, opt):
         BaseModel.initialize(self, opt)
@@ -43,14 +43,18 @@ class PoseNetModel(BaseModel):
             self.old_lr = opt.lr
             # define loss functions
             self.criterion = torch.nn.MSELoss()
-
+            
             # initialize optimizers
             self.schedulers = []
             self.optimizers = []
+            #self.optimizer_G = torch.optim.Adam(self.netG.parameters(),
+            #                                    lr=opt.lr, eps=1,
+            #                                    weight_decay=0.0625,
+            #                                    betas=(self.opt.beta1, 0.999))
             self.optimizer_G = torch.optim.Adam(self.netG.parameters(),
                                                 lr=opt.lr, eps=1,
-                                                weight_decay=0.002,
-                                                betas=(self.opt.beta1, 0.999))
+                                                weight_decay=0.001,
+                                                betas=(self.opt.beta1, 0.999))            
             self.optimizers.append(self.optimizer_G)
             for optimizer in self.optimizers:
                 self.schedulers.append(networks.get_scheduler(optimizer, opt))
@@ -77,7 +81,7 @@ class PoseNetModel(BaseModel):
     def get_image_paths(self):
         return self.image_paths
 
-    def backward_G(self):
+    def backward_G(self):        
         self.loss_G = 0
         self.loss_aux = np.array([0, 0, 0, 0, 0], dtype=np.float)
         loss_weights = [self.opt.beta*0.3, self.opt.beta*0.3, self.opt.beta]
@@ -91,6 +95,17 @@ class PoseNetModel(BaseModel):
                 self.loss_aux[l+1] = mse_pos.item()
                 self.loss_aux[l+2] = mse_ori.item()
         self.loss_G.backward()
+        '''
+        self.loss_G = 0
+        self.loss_aux = np.array([0, 0], dtype=np.float)
+        mse_pos = self.criterionXYZ(self.pred_B[0], self.input_B[:, 0:3])
+        ori_gt = F.normalize(self.input_B[:, 3:], p=2, dim=1)
+        mse_ori = self.criterionWPQR(self.pred_B[1], ori_gt) * self.opt.beta
+        self.loss_G = mse_pos + mse_ori
+        self.loss_aux[0] = mse_pos.item()
+        self.loss_aux[1] = mse_ori.item()
+        self.loss_G.backward()
+        '''
 
     def optimize_parameters(self):
         self.forward()
@@ -106,13 +121,20 @@ class PoseNetModel(BaseModel):
             #                     ('mse_pos_final', self.loss_aux[3]),
             #                     ('mse_ori_final', self.loss_aux[4]),
             #                     ])
-            return OrderedDict([('mse_pos_final', self.loss_aux[3]),
+            '''
+            return OrderedDict([('mse_pos_final', self.loss_aux[0]),
+                                ('mse_ori_final', self.loss_aux[1]),
+                                ])       
+            '''     
+            return OrderedDict([('total_loss', self.loss_aux[2]),
+                                ('mse_pos_final', self.loss_aux[3]),
                                 ('mse_ori_final', self.loss_aux[4]),
                                 ])
 
         pos_err = torch.dist(self.pred_B[0], self.input_B[:, 0:3])
         ori_gt = F.normalize(self.input_B[:, 3:], p=2, dim=1)
         abs_distance = torch.abs((ori_gt.mul(self.pred_B[1])).sum())
+        # abs_distance = torch.clamp(abs_distance, max=1)
         ori_err = 2*180/numpy.pi* torch.acos(abs_distance)
         return [pos_err.item(), ori_err.item()]
 
