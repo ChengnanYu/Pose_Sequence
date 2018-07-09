@@ -49,7 +49,7 @@ class PoseNetModel(BaseModel):
             self.optimizers = []
             self.optimizer_G = torch.optim.Adam(self.netG.parameters(),
                                                 lr=opt.lr, eps=1,
-                                                weight_decay=0.002,
+                                                weight_decay=0.0002,
                                                 betas=(self.opt.beta1, 0.999))
             self.optimizers.append(self.optimizer_G)
             for optimizer in self.optimizers:
@@ -80,11 +80,12 @@ class PoseNetModel(BaseModel):
     def backward_G(self):
         self.loss_G = 0
         self.loss_aux = np.array([0, 0, 0, 0, 0], dtype=np.float)
-        loss_weights = [self.opt.beta*0.3, self.opt.beta*0.3, self.opt.beta]
-        for l, beta in enumerate(loss_weights):
-            mse_pos = self.criterion(self.pred_B[2*l], self.input_B[:, 0:3])
+        beta = self.opt.beta
+        loss_weights = [0.3, 0.3, 1.0]
+        for l, weight in enumerate(loss_weights):
+            mse_pos = self.criterion(self.pred_B[2*l], self.input_B[:, 0:3]) * weight
             ori_gt = F.normalize(self.input_B[:, 3:], p=2, dim=1)
-            mse_ori = self.criterion(self.pred_B[2*l+1], ori_gt) * beta
+            mse_ori = self.criterion(self.pred_B[2*l+1], ori_gt) * weight * beta
             self.loss_G += mse_pos + mse_ori
             self.loss_aux[l] = self.loss_G.item()
             if l == 2:
@@ -106,7 +107,8 @@ class PoseNetModel(BaseModel):
             #                     ('mse_pos_final', self.loss_aux[3]),
             #                     ('mse_ori_final', self.loss_aux[4]),
             #                     ])
-            return OrderedDict([('mse_pos_final', self.loss_aux[3]),
+            return OrderedDict([('total_loss', self.loss_aux[2]),
+                                ('mse_pos_final', self.loss_aux[3]),
                                 ('mse_ori_final', self.loss_aux[4]),
                                 ])
 
