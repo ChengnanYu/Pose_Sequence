@@ -39,7 +39,7 @@ def get_scheduler(optimizer, opt):
     return scheduler
 
 
-def define_G(input_nc, output_nc, ngf, which_model_netG, norm='batch', use_dropout=False, init_type='normal', gpu_ids=[],
+def define_G(input_nc, output_nc, ngf, which_model_netG, sx, sq, norm='batch', use_dropout=False, init_type='normal', gpu_ids=[],
              init_from=None, isTest=False):
     netG = None
     use_gpu = len(gpu_ids) > 0
@@ -51,6 +51,8 @@ def define_G(input_nc, output_nc, ngf, which_model_netG, norm='batch', use_dropo
         netG = PoseNet(input_nc, weights=init_from, isTest=isTest, gpu_ids=gpu_ids)
     elif which_model_netG == 'poselstm':
         netG = PoseLSTM(input_nc, weights=init_from, isTest=isTest, gpu_ids=gpu_ids)
+    elif which_model_netG == 'posenetnobeta':
+        netG = PoseNetNoBeta(input_nc, sx=sx, sq=sq, weights=init_from, isTest=isTest, gpu_ids=gpu_ids)
     else:
         raise NotImplementedError('Generator model name [%s] is not recognized' % which_model_netG)
     if len(gpu_ids) > 0:
@@ -344,3 +346,71 @@ class PoseLSTM(nn.Module):
         if not self.isTest:
             return self.cls1_fc(output_4a) + self.cls2_fc(output_4d) +  self.cls3_fc(output_5b)
         return self.cls3_fc(output_5b)
+
+class PoseNetNoBeta(nn.Module):
+    def __init__(self, input_nc, sx, sq, weights=None, isTest=False, gpu_ids=[]):
+        super(PoseNetNoBeta, self).__init__()
+        self.gpu_ids = gpu_ids
+        self.isTest = isTest
+        # initilize learning beta
+        self.l1_sx = nn.Parameter(torch.tensor(sx),requires_grad=True)
+        self.l1_sq = nn.Parameter(torch.tensor(sq),requires_grad=True)
+        self.l2_sx = nn.Parameter(torch.tensor(sx),requires_grad=True)
+        self.l2_sq = nn.Parameter(torch.tensor(sq),requires_grad=True)
+        self.l3_sx = nn.Parameter(torch.tensor(sx),requires_grad=True)
+        self.l3_sq = nn.Parameter(torch.tensor(sq),requires_grad=True)
+        self.learning_beta = [(self.l1_sx, self.l1_sq), (self.l2_sx, self.l2_sq), (self.l3_sx, self.l3_sq)]
+        self.before_inception = nn.Sequential(*[
+            weight_init_googlenet("conv1/7x7_s2", nn.Conv2d(input_nc, 64, kernel_size=7, stride=2, padding=3), weights),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(kernel_size=3, stride=2, padding=1),
+            nn.LocalResponseNorm(5),
+            weight_init_googlenet("conv2/3x3_reduce", nn.Conv2d(64, 64, kernel_size=1)),
+            nn.ReLU(inplace=True),
+            weight_init_googlenet("conv2/3x3", nn.Conv2d(64, 192, kernel_size=3, padding=1), weights),
+            nn.ReLU(inplace=True),
+            nn.LocalResponseNorm(5),
+            nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+            ])
+
+        self.inception_3a = InceptionBlock("3a", 192, 64, 96, 128, 16, 32, 32, weights, gpu_ids)
+        self.inception_3b = InceptionBlock("3b", 256, 128, 128, 192, 32, 96, 64, weights, gpu_ids)
+        self.inception_4a = InceptionBlock("4a", 480, 192, 96, 208, 16, 48, 64, weights, gpu_ids)
+        self.inception_4b = InceptionBlock("4b", 512, 160, 112, 224, 24, 64, 64, weights, gpu_ids)
+        self.inception_4c = InceptionBlock("4c", 512, 128, 128, 256, 24, 64, 64, weights, gpu_ids)
+        self.inception_4d = InceptionBlock("4d", 512, 112, 144, 288, 32, 64, 64, weights, gpu_ids)
+        self.inception_4e = InceptionBlock("4e", 528, 256, 160, 320, 32, 128, 128, weights, gpu_ids)
+        self.inception_5a = InceptionBlock("5a", 832, 256, 160, 320, 32, 128, 128, weights, gpu_ids)
+        self.inception_5b = InceptionBlock("5b", 832, 384, 192, 384, 48, 128, 128, weights, gpu_ids)
+
+        self.cls1_fc = RegressionHead(lossID="loss1", weights=weights)
+        self.cls2_fc = RegressionHead(lossID="loss2", weights=weights)
+        self.cls3_fc = RegressionHead(lossID="loss3", weights=weights)
+
+        self.model = nn.Sequential(*[self.inception_3a, self.inception_3b,
+                                   self.inception_4a, self.inception_4b,
+                                   self.inception_4c, self.inception_4d,
+                                   self.inception_4e, self.inception_5a,
+                                   self.inception_5b, self.cls1_fc,
+                                   self.cls2_fc, self.cls3_fc
+                                   ])
+        if self.isTest:
+            self.model.eval() # ensure Dropout is deactivated during test
+
+    def forward(self, input):
+
+        output_bf = self.before_inception(input)
+        output_3a = self.inception_3a(output_bf)
+        output_3b = self.inception_3b(output_3a)
+        output_4a = self.inception_4a(output_3b)
+        output_4b = self.inception_4b(output_4a)
+        output_4c = self.inception_4c(output_4b)
+        output_4d = self.inception_4d(output_4c)
+        output_4e = self.inception_4e(output_4d)
+        output_5a = self.inception_5a(output_4e)
+        output_5b = self.inception_5b(output_5a)
+
+        if not self.isTest:
+            return self.cls1_fc(output_4a) + self.cls2_fc(output_4d) +  self.cls3_fc(output_5b)
+        return self.cls3_fc(output_5b)
+

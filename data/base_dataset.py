@@ -63,6 +63,7 @@ def __scale_width(img, target_width):
 
 def __subtract_mean(img, mean_image):
     return numpy.array(img).astype('float') - mean_image.astype('float')
+    #return numpy.array(img).astype('float')
 
 def __crop_image(img, size, isTrain):
     h, w = img.shape[0:2]
