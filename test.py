@@ -9,23 +9,27 @@ import numpy
 
 opt = TestOptions().parse()
 opt.nThreads = 1   # test code only supports nThreads = 1
-opt.batchSize = 1  # test code only supports batchSize = 1
+opt.batchSize = 1  # test code only supports one batch
+opt.overlap_step = opt.sequence_length #no overlap during testing
 opt.serial_batches = True  # no shuffle
 opt.no_flip = True  # no flip
+opt.rname = opt.name + '_all'
 
 data_loader = CreateDataLoader(opt)
 dataset = data_loader.load_data()
+dataset_size = len(data_loader)
+print('#test sequences = %d' % dataset_size)
 
 # create website
 # web_dir = os.path.join(opt.results_dir, opt.name, '%s_%s' % (opt.phase, opt.which_epoch))
 # webpage = html.HTML(web_dir, 'Experiment = %s, Phase = %s, Epoch = %s' % (opt.name, opt.phase, opt.which_epoch))
-results_dir = os.path.join(opt.results_dir, opt.name)
+results_dir = os.path.join(opt.results_dir, opt.rname)
 if not os.path.exists(results_dir):
     os.makedirs(results_dir)
 
 testepochs = ['latest']
 besterror  = [0, float('inf'), float('inf')] # nepoch, medX, medQ
-testepochs = numpy.arange(150, 501, 5)
+testepochs = numpy.arange(5, 1001, 5)
 testfile = open(os.path.join(results_dir, 'test_median.txt'), 'a')
 testfile.write('epoch medX  medQ\n')
 testfile.write('==================\n')
@@ -45,15 +49,15 @@ for testepoch in testepochs:
     for i, data in enumerate(dataset):
         model.set_input(data)
         model.test()
-        img_path = model.get_image_paths()[0]
-        print('\t%04d/%04d: process image... %s' % (i, len(dataset), img_path), end='\r')
-        image_path = img_path.split('/')[-2] + '/' + img_path.split('/')[-1]
+        img_path = model.get_image_paths()
         pose = model.get_current_pose()
-        visualizer.save_estimated_pose(image_path, pose)
-        err_p, err_o = model.get_current_errors()
-        # err_pos.append(err_p)
-        # err_ori.append(err_o)
-        err.append([err_p, err_o])
+        for j in range(img_path.shape[1]):
+            print('\t%04d/%04d: process image sequence ... %s' % (i+1, len(dataset), img_path[0,j]), end='\r')
+            image_path = img_path[0,j].split('/')[-2] + '/' + img_path[0,j].split('/')[-1]
+            visualizer.save_estimated_pose(image_path, pose[0,j,:])
+            # err_pos.append(err_p)
+            # err_ori.append(err_o)
+        err = err + model.get_current_errors()
 
     median_pos = numpy.median(err, axis=0)
     if median_pos[0] < besterror[1]:

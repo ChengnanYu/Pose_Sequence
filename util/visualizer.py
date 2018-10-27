@@ -30,7 +30,7 @@ class Visualizer():
                 now = time.strftime("%c")
                 log_file.write('================ Training Loss (%s) ================\n' % now)
         else:
-            self.log_name = os.path.join(opt.results_dir, opt.name, '%s_%s.txt' % (opt.phase, opt.which_epoch))
+            self.log_name = os.path.join(opt.results_dir, opt.rname, '%s_%s.txt' % (opt.phase, opt.which_epoch))
             with open(self.log_name, "w") as log_file:
                 log_file.close()
 
@@ -121,7 +121,7 @@ class Visualizer():
     def print_current_errors(self, epoch, i, errors, t):
         message = '(epoch: %d, iters: %d, time: %.3f) ' % (epoch, i, t)
         for k, v in errors.items():
-            message += '%s: %.3f ' % (k, v)
+            message += '%s: %.6f ' % (k, v)
 
         print(message)
         with open(self.log_name, "a") as log_file:
@@ -150,7 +150,7 @@ class Visualizer():
 
     def change_log_path(self, which_epoch):
         self.log_name = os.path.join(self.opt.results_dir,
-                                     self.opt.name,
+                                     self.opt.rname,
                                      '%s_%s.txt' % (self.opt.phase, which_epoch))
 
     def save_estimated_pose(self, image_path, pose):
